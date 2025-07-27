@@ -47,7 +47,7 @@ class AirtableFieldCreator:
             }},
             
             # Education fields
-            {'name': 'AI_Founder_Experience_Count', 'type':'number'},
+            {'name': 'AI_Founder_Experience_Count', 'type': 'number', 'options': {'precision': 0}},
             {'name': 'AI_Undergraduate', 'type': 'multilineText'},
             {'name': 'AI_Masters', 'type': 'multilineText'},
             {'name': 'AI_PhD', 'type': 'multilineText'},
@@ -55,11 +55,12 @@ class AirtableFieldCreator:
             
             # Career insights (numbers)
             {'name': 'AI_Avg_Tenure_Per_Role', 'type': 'number', 'options': {'precision': 2}},
-            {'name': 'AI_Total_Experience_Count', 'type': 'number'},
-            {'name': 'AI_Founder_Experience_Count', 'type': 'number'},
-            {'name:' : 'AI_Industry_Switches', 'type': 'number'},
-            {'name': 'AI_Total_Years_Experience', 'type':'number'},
-            {'name': 'AI_Industry_Switches', 'type': 'number'},
+            {'name': 'AI_Total_Experience_Count', 'type': 'number', 'options': {'precision': 0}},
+            {'name': 'AI_Founder_Experience_Count', 'type': 'number', 'options': {'precision': 0}},
+            {'name': 'AI_Industry_Switches', 'type': 'number', 'options': {'precision': 0}},
+            {'name': 'AI_Total_Years_Experience', 'type': 'number', 'options': {'precision': 2}},
+            {'name': 'AI_Years_Out_Of_Education', 'type': 'number', 'options': {'precision': 0}},
+            {'name': 'AI_Years_In_Industry', 'type': 'number', 'options': {'precision': 0}},
             
             # Career insights (checkboxes/booleans)
             {'name': 'AI_Job_Hopper', 'type': 'checkbox'},
@@ -84,7 +85,7 @@ class AirtableFieldCreator:
             {'name': 'AI_Pivot_Description', 'type': 'multilineText'},
             
             # Personal brand
-            {'name': 'AI_Headline_Keywords', 'type': 'multilineText'}
+            {'name': 'AI_Headline_Keywords', 'type': 'multilineText'},
             
             # Academic and research
             {'name': 'AI_Academic_Roles', 'type': 'multilineText'},

@@ -89,6 +89,7 @@ function App() {
           onEventFilterChange={handleGlobalEventFilterChange}
           globalTop100Filter={globalTop100Filter}
           onTop100FilterChange={handleGlobalTop100FilterChange}
+          onError={handleError}
         />
 
         {/* Messages */}

@@ -72,6 +72,51 @@ def main():
     print(f"Processed {len(results)} profiles successfully")
 
 
+def demonstrate_progress_tracking():
+    """Demonstrate the new progress tracking functionality."""
+    print("🧪 DEMONSTRATING PROGRESS TRACKING")
+    print("=" * 50)
+    
+    extractor = LinkedInTraitExtractor()
+    
+    # Example 1: Check progress without processing
+    print("\n1. Checking progress...")
+    progress_stats = extractor.check_progress(
+        'cleaned-profile-data/S25Top100cleaned_linkedin_data.json',
+        'final-trait-extractions/S25Top100_comprehensive_traits.json'
+    )
+    
+    # Example 2: Process a few profiles with progress tracking
+    print("\n2. Processing 5 profiles with progress tracking...")
+    with open('cleaned-profile-data/S25Top100cleaned_linkedin_data.json', 'r', encoding='utf-8') as f:
+        profiles = json.load(f)
+    
+    results = extractor.extract_traits_from_profiles(
+        profiles, 
+        max_profiles=5,
+        force_reextraction=False,
+        output_file='final-trait-extractions/S25Top100_comprehensive_traits.json'
+    )
+    
+    # Example 3: Check progress again
+    print("\n3. Checking progress after processing...")
+    progress_stats_after = extractor.check_progress(
+        'cleaned-profile-data/S25Top100cleaned_linkedin_data.json',
+        'final-trait-extractions/S25Top100_comprehensive_traits.json'
+    )
+    
+    # Example 4: Force re-extraction
+    print("\n4. Force re-extraction of 2 profiles...")
+    results_force = extractor.extract_traits_from_profiles(
+        profiles, 
+        max_profiles=2,
+        force_reextraction=True,
+        output_file='final-trait-extractions/S25Top100_comprehensive_traits.json'
+    )
+    
+    print("\n✅ Progress tracking demonstration completed!")
+
+
 @dataclass
 class ExtractedTraits:
     """Data class to hold comprehensive extracted traits from a LinkedIn profile."""
@@ -134,6 +179,8 @@ REQUIRED JSON FORMAT:
         "has_previous_c_suite_experience": true/false,
         "founder_experience_count": 2,
         "industry_switches": 1,
+        "years_out_of_education": 8,
+        "years_in_industry": 6,
         "career_summary": "CEO at StartupCo for 3 yrs; VP Product at TechCorp for 2 yrs 6 mos; Senior Engineer at BigTech for 4 yrs"
     },
     "company_background": {
@@ -166,7 +213,7 @@ EXTRACTION GUIDELINES:
 
 1. LINKEDIN URL: Extract the linkedinUrl from the profile data exactly as provided.
 
-2. ESTIMATED AGE: Calculate from graduation years. Typical undergraduate graduation is age 22-23. If only one education date, estimate from that. Format as a single value.
+2. ESTIMATED AGE: Calculate from graduation years using 2025 as the current year. Most people begin their bachelor's degree at age 18. If no start date is provided for bachelor's, assume it was a 4-year degree (graduating at age 22). If no education dates are present at all, estimate from their EARLIEST work experience, assuming they were 18 at that time. Examples: Bachelor's graduated 2018 = age 29 (2025-2018+22), Earliest work experience 2015 = age 28 (2025-2015+18). Format as a single value.
 
 3. EDUCATION STAGES: Extract all education levels separately. Format as "University - Degree - Field - Year of Graduation". Mark missing stages as null.
 
@@ -179,11 +226,13 @@ EXTRACTION GUIDELINES:
 
 5. CAREER INSIGHTS: 
    - Job hopper: avg tenure < 2 years
-   - Number of jobs: total number ofroles they've had from profile
+   - Number of jobs: total number of roles they've had from profile
    - Industry switches: count distinct industries
+   - Years out of education: Calculate total years since last education completion (undergraduate, masters, or PhD graduation). Use 2025 as current year. If no education dates, estimate from earliest work experience (assuming they were 18 at that time)
+   - Years in industry: Calculate years of experience in their current/primary industry (excluding startup/founder roles). Use 2025 as current year
    - Career summary: Format as "Title at Company for Duration; Title at Company for Duration" (chronological order, most recent first)
 
-6. COMPANY BACKGROUND: Spot notable companies or startup companies worked in.
+6. COMPANY BACKGROUND: Spot notable companies or startup companies worked in. Quantify the number of startups they've worked in by the number of startup or 'founder' related roles in their work expereince section
 
 7. EDUCATION-CAREER ALIGNMENT: Compare field of study with current work. Identify pivots and unusual career paths.
 
@@ -216,7 +265,15 @@ LEADERSHIP INDICATORS:
 - Hiring/firing authority
 - Strategic planning role
 
-IMPORTANT: Return ONLY the JSON object, no additional text or markdown formatting. Be thorough in your analysis but conservative in your claims."""
+AGE CALCULATION METHODOLOGY:
+- Current year: 2025
+- Standard bachelor's degree: 4 years (age 18-22)
+- If bachelor's graduation year provided: Age = 2025 - graduation_year + 22
+- If no education dates but work experience exists: Age = 2025 - earliest_work_year + 18
+- If only master's/PhD graduation: Use that graduation year + appropriate age (typically 24 for master's, 28 for PhD)
+- If no dates at all: Use earliest work experience year + 18
+
+IMPORTANT: Return ONLY the JSON object, no additional text or markdown formatting. Be thorough in your analysis but conservative in your claims. IF YOU ARE EVER UNSURE, JUST PUT IN A VALUE OF "-1" FOR STRINGS, AND -1 FOR NUMBERS"""
     
     def extract_traits_from_profile(self, profile_data: Dict[str, Any], max_retries: int = 2) -> Optional[ExtractedTraits]:
         """
@@ -293,6 +350,77 @@ IMPORTANT: Return ONLY the JSON object, no additional text or markdown formattin
         
         return None
     
+    def load_progress(self, progress_file: str) -> List[str]:
+        """Load progress tracking file"""
+        try:
+            if os.path.exists(progress_file):
+                with open(progress_file, 'r', encoding='utf-8') as file:
+                    progress = json.load(file)
+                return progress.get('processed_urls', [])
+        except Exception as e:
+            print(f"Error loading progress: {e}")
+        return []
+
+    def save_progress(self, progress_file: str, processed_urls: List[str]):
+        """Save progress tracking file"""
+        try:
+            os.makedirs(os.path.dirname(progress_file), exist_ok=True)
+            progress_data = {
+                'processed_urls': processed_urls,
+                'last_updated': time.strftime('%Y-%m-%d %H:%M:%S')
+            }
+            with open(progress_file, 'w', encoding='utf-8') as file:
+                json.dump(progress_data, file, indent=2)
+        except Exception as e:
+            print(f"Error saving progress: {e}")
+
+    def load_existing_results(self, output_file: str) -> List[ExtractedTraits]:
+        """Load existing results from file if it exists"""
+        try:
+            if os.path.exists(output_file):
+                with open(output_file, 'r', encoding='utf-8') as file:
+                    existing_data = json.load(f)
+                existing_results = [
+                    ExtractedTraits(
+                        full_name=item['full_name'],
+                        linkedin_url=item['linkedin_url'],
+                        estimated_age=item.get('estimated_age'),
+                        education_stages=item.get('education_stages', {}),
+                        career_insights=item.get('career_insights', {}),
+                        company_background=item.get('company_background', {}),
+                        accelerator_and_programs=item.get('accelerator_and_programs', {}),
+                        education_career_alignment=item.get('education_career_alignment', {}),
+                        personal_brand=item.get('personal_brand', {}),
+                        research_and_academic=item.get('research_and_academic', {}),
+                        international_experience=item.get('international_experience', {}),
+                        confidence_score=item.get('confidence_score', 'Low')
+                    ) for item in existing_data
+                ]
+                print(f"Loaded {len(existing_results)} existing results from {output_file}")
+                return existing_results
+        except Exception as e:
+            print(f"Error loading existing results: {e}")
+        return []
+
+    def append_results_to_file(self, new_results: List[ExtractedTraits], output_file: str) -> int:
+        """Append new results to existing file"""
+        try:
+            existing_results = self.load_existing_results(output_file)
+            existing_results.extend(new_results)
+            self.save_results(existing_results, output_file)
+            return len(existing_results)
+        except Exception as e:
+            print(f"Error appending results: {e}")
+            return 0
+
+    def get_remaining_profiles(self, all_profiles: List[Dict[str, Any]], processed_urls: List[str]) -> List[Dict[str, Any]]:
+        """Get profiles that haven't been processed yet"""
+        processed_set = set(processed_urls)
+        remaining = [profile for profile in all_profiles 
+                    if profile.get('linkedinUrl', '').strip() 
+                    and profile.get('linkedinUrl', '').strip() not in processed_set]
+        return remaining
+
     def extract_traits_from_profiles(
         self, 
         profiles: List[Dict[str, Any]], 
@@ -316,42 +444,44 @@ IMPORTANT: Return ONLY the JSON object, no additional text or markdown formattin
         Returns:
             List of ExtractedTraits objects
         """
+        # Set up progress tracking
+        if progress_file is None and output_file:
+            progress_file = output_file.replace('.json', '_progress.json')
+        
+        # Load existing progress
+        processed_urls = self.load_progress(progress_file) if progress_file else []
+        
         # Load existing results if they exist
         existing_results = []
-        processed_urls: Set[str] = set()
-        
         if output_file and os.path.exists(output_file) and not force_reextraction:
-            try:
-                with open(output_file, 'r', encoding='utf-8') as f:
-                    existing_data = json.load(f)
-                    existing_results = [
-                        ExtractedTraits(
-                            full_name=item['full_name'],
-                            linkedin_url=item['linkedin_url'],
-                            estimated_age=item.get('estimated_age'),
-                            education_stages=item.get('education_stages', {}),
-                            career_insights=item.get('career_insights', {}),
-                            company_background=item.get('company_background', {}),
-                            accelerator_and_programs=item.get('accelerator_and_programs', {}),
-                            education_career_alignment=item.get('education_career_alignment', {}),
-                            personal_brand=item.get('personal_brand', {}),
-                            research_and_academic=item.get('research_and_academic', {}),
-                            international_experience=item.get('international_experience', {}),
-                            confidence_score=item.get('confidence_score', 'Low')
-                        ) for item in existing_data
-                    ]
-                    processed_urls = {result.linkedin_url for result in existing_results}
-                    print(f"Loaded {len(existing_results)} existing results from {output_file}")
-            except Exception as e:
-                print(f"Error loading existing results: {e}")
+            existing_results = self.load_existing_results(output_file)
+        
+        # Get remaining profiles to process
+        remaining_profiles = self.get_remaining_profiles(profiles, processed_urls)
+        
+        if not remaining_profiles and not force_reextraction:
+            print("✅ All profiles have already been processed!")
+            return existing_results
+        
+        print(f"📊 Progress Status:")
+        print(f"  Total profiles: {len(profiles)}")
+        print(f"  Already processed: {len(processed_urls)}")
+        print(f"  Remaining to process: {len(remaining_profiles)}")
+        
+        if len(processed_urls) > 0 and not force_reextraction:
+            print(f"🔄 RESUMING from {len(processed_urls)} completed profiles")
         
         # Track new results from this session
         new_results = []
         profiles_processed_this_session = 0
         
-        print(f"Starting extraction session. Target: {max_profiles if max_profiles != -1 else 'all remaining'} profiles")
+        # Determine how many profiles to process in this session
+        if max_profiles != -1:
+            remaining_profiles = remaining_profiles[:max_profiles]
         
-        for i, profile in enumerate(profiles):
+        print(f"Starting extraction session. Target: {len(remaining_profiles)} profiles")
+        
+        for i, profile in enumerate(remaining_profiles):
             profile_url = profile.get('linkedinUrl', '').strip()
             
             # Skip if no URL
@@ -359,46 +489,37 @@ IMPORTANT: Return ONLY the JSON object, no additional text or markdown formattin
                 print(f"Skipping profile {i + 1}: No LinkedIn URL found")
                 continue
             
-            # Skip if already processed (unless force re-extraction)
-            if profile_url in processed_urls and not force_reextraction:
-                print(f"Skipping profile {i + 1}: {profile.get('fullName', 'Unknown')} - already processed")
-                continue
-            
-            # Check if we've reached our session limit
-            if max_profiles != -1 and profiles_processed_this_session >= max_profiles:
-                print(f"Reached session limit of {max_profiles} profiles. Stopping.")
-                break
-            
-            print(f"Processing profile {profiles_processed_this_session + 1}/{max_profiles if max_profiles != -1 else '?'}: {profile.get('fullName', 'Unknown')}")
+            print(f"Processing profile {i + 1}/{len(remaining_profiles)}: {profile.get('fullName', 'Unknown')}")
             
             traits = self.extract_traits_from_profile(profile)
             if traits:
                 new_results.append(traits)
-                processed_urls.add(profile_url)
+                processed_urls.append(profile_url)
                 profiles_processed_this_session += 1
                 print(f"✓ Successfully extracted traits")
                 
                 # Save progress incrementally
+                if progress_file:
+                    self.save_progress(progress_file, processed_urls)
+                
+                # Save results incrementally
                 if output_file:
-                    all_results = existing_results + new_results
-                    self.save_results(all_results, output_file)
-                    print(f"Progress saved: {len(all_results)} total profiles processed")
+                    total_saved = self.append_results_to_file([traits], output_file)
+                    print(f"Progress saved: {total_saved} total profiles processed")
             else:
                 print(f"✗ Failed to extract traits")
             
             # Rate limiting
-            if i < len(profiles) - 1:
+            if i < len(remaining_profiles) - 1:
                 time.sleep(delay_between_calls)
         
-        # Final save and summary
+        # Final summary
         all_results = existing_results + new_results
-        if output_file:
-            self.save_results(all_results, output_file)
         
         print(f"\n=== SESSION SUMMARY ===")
         print(f"New profiles processed this session: {len(new_results)}")
         print(f"Total profiles in results file: {len(all_results)}")
-        print(f"Remaining unprocessed profiles: {len([p for p in profiles if p.get('linkedinUrl', '').strip() and p.get('linkedinUrl', '').strip() not in processed_urls])}")
+        print(f"Remaining unprocessed profiles: {len(self.get_remaining_profiles(profiles, processed_urls))}")
         
         return all_results
     
@@ -442,12 +563,12 @@ IMPORTANT: Return ONLY the JSON object, no additional text or markdown formattin
         with open(input_profiles_file, 'r', encoding='utf-8') as f:
             all_profiles = json.load(f)
         
+        # Load progress tracking file
+        progress_file = output_file.replace('.json', '_progress.json')
+        processed_urls = self.load_progress(progress_file)
+        
         # Load existing results if they exist
-        processed_urls = set()
-        if os.path.exists(output_file):
-            with open(output_file, 'r', encoding='utf-8') as f:
-                existing_results = json.load(f)
-                processed_urls = {result['linkedin_url'] for result in existing_results}
+        existing_results = self.load_existing_results(output_file)
         
         # Calculate statistics
         total_profiles = len(all_profiles)
@@ -462,7 +583,10 @@ IMPORTANT: Return ONLY the JSON object, no additional text or markdown formattin
             'processed_profiles': processed_count,
             'remaining_profiles': remaining_count,
             'completion_percentage': round((processed_count / valid_profiles) * 100, 1) if valid_profiles > 0 else 0,
-            'processed_urls': list(processed_urls)
+            'processed_urls': processed_urls,
+            'results_file_exists': os.path.exists(output_file),
+            'progress_file_exists': os.path.exists(progress_file),
+            'existing_results_count': len(existing_results)
         }
         
         print(f"\n=== EXTRACTION PROGRESS ===")
@@ -471,12 +595,28 @@ IMPORTANT: Return ONLY the JSON object, no additional text or markdown formattin
         print(f"Already processed: {processed_count}")
         print(f"Remaining to process: {remaining_count}")
         print(f"Completion: {progress_stats['completion_percentage']}%")
+        print(f"Results file exists: {progress_stats['results_file_exists']}")
+        print(f"Progress file exists: {progress_stats['progress_file_exists']}")
+        print(f"Existing results count: {progress_stats['existing_results_count']}")
         
         return progress_stats
 
 
 if __name__ == "__main__":
-    main() 
+    # Uncomment one of the following options:
+    
+    # Option 1: Run the main extraction
+    main()
+    
+    # Option 2: Demonstrate progress tracking
+    # demonstrate_progress_tracking()
+    
+    # Option 3: Just check progress without processing
+    # extractor = LinkedInTraitExtractor()
+    # extractor.check_progress(
+    #     'cleaned-profile-data/S25Top100cleaned_linkedin_data.json',
+    #     'final-trait-extractions/S25Top100_comprehensive_traits.json'
+    # ) 
 
 
 ''' 

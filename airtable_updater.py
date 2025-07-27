@@ -124,6 +124,10 @@ class AirtableTraitUpdater:
             formatted_data['AI_Founder_Experience_Count'] = career['founder_experience_count']
         if career.get('industry_switches'):
             formatted_data['AI_Industry_Switches'] = career['industry_switches']
+        if career.get('years_out_of_education'):
+            formatted_data['AI_Years_Out_Of_Education'] = career['years_out_of_education']
+        if career.get('years_in_industry'):
+            formatted_data['AI_Years_In_Industry'] = career['years_in_industry']
         if career.get('career_summary'):
             formatted_data['AI_Career_Summary'] = career['career_summary']
         

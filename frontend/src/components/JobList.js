@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { apiService } from '../api';
+import CancelJobButton from './CancelJobButton';
 
 const JobList = ({ onJobSelected, onError }) => {
   const [extractionJobs, setExtractionJobs] = useState([]);
@@ -95,6 +96,30 @@ const JobList = ({ onJobSelected, onError }) => {
     }
   }, [loadJobs, onError]);
 
+  const cancelJob = useCallback(async (jobId, jobType = 'extraction') => {
+    try {
+      if (jobType === 'apify') {
+        await apiService.cancelApifyJob(jobId);
+      } else if (jobType === 'cleaner') {
+        await apiService.cancelDataCleanerJob(jobId);
+      } else if (jobType === 'traits') {
+        await apiService.cancelTraitExtractorJob(jobId);
+      } else if (jobType === 'airtable') {
+        await apiService.cancelAirtableUpdaterJob(jobId);
+      } else {
+        await apiService.cancelJob(jobId);
+      }
+      await loadJobs(); // Reload jobs list
+      if (onError) {
+        onError(`Job ${jobId} cancelled successfully`);
+      }
+    } catch (error) {
+      if (onError) {
+        onError(error.message);
+      }
+    }
+  }, [loadJobs, onError]);
+
   const getJobResults = useCallback(async (jobId, jobType = 'extraction') => {
     try {
       let results;
@@ -132,6 +157,8 @@ const JobList = ({ onJobSelected, onError }) => {
         return 'status-completed';
       case 'failed':
         return 'status-failed';
+      case 'cancelled':
+        return 'status-cancelled';
       default:
         return 'status-queued';
     }
@@ -369,6 +396,14 @@ const JobList = ({ onJobSelected, onError }) => {
               >
                 View Results
               </button>
+            )}
+            {(job.status === 'running' || job.status === 'queued') && (
+              <CancelJobButton
+                jobId={job.job_id}
+                jobType={jobType}
+                onCancel={cancelJob}
+                onError={onError}
+              />
             )}
             <button
               className="btn btn-danger"

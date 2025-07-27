@@ -18,6 +18,11 @@ Usage:
 import os
 import json
 import asyncio
+import signal
+import subprocess
+import psutil
+import threading
+import sys
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from pathlib import Path
@@ -54,6 +59,13 @@ apify_jobs: Dict[str, Dict[str, Any]] = {}
 data_cleaner_jobs: Dict[str, Dict[str, Any]] = {}
 trait_extractor_jobs: Dict[str, Dict[str, Any]] = {}
 airtable_updater_jobs: Dict[str, Dict[str, Any]] = {}
+
+# Global state for tracking cancellation requests
+cancellation_requests: Dict[str, bool] = {}
+
+# Global state for tracking running processes
+running_processes: Dict[str, List[int]] = {}  # job_id -> list of process IDs
+process_lock = threading.Lock()
 
 # Terminal logs storage
 terminal_logs: List[Dict[str, Any]] = []
@@ -523,6 +535,155 @@ def update_airtable_updater_job_progress(job_id: str, progress_data: Dict[str, A
     if job_id in airtable_updater_jobs:
         airtable_updater_jobs[job_id]["progress"] = progress_data
 
+def check_cancellation(job_id: str) -> bool:
+    """Check if a job has been requested to be cancelled."""
+    return job_id in cancellation_requests and cancellation_requests[job_id]
+
+def add_process_to_job(job_id: str, process_id: int):
+    """Add a process ID to a job's tracking list."""
+    with process_lock:
+        if job_id not in running_processes:
+            running_processes[job_id] = []
+        running_processes[job_id].append(process_id)
+
+def remove_process_from_job(job_id: str, process_id: int):
+    """Remove a process ID from a job's tracking list."""
+    with process_lock:
+        if job_id in running_processes and process_id in running_processes[job_id]:
+            running_processes[job_id].remove(process_id)
+
+def kill_job_processes(job_id: str) -> Dict[str, Any]:
+    """Forcefully terminate all processes associated with a job."""
+    results = {
+        "job_id": job_id,
+        "processes_found": 0,
+        "processes_killed": 0,
+        "errors": []
+    }
+    
+    with process_lock:
+        if job_id not in running_processes:
+            return results
+        
+        process_ids = running_processes[job_id].copy()
+        running_processes[job_id] = []  # Clear the list
+    
+    results["processes_found"] = len(process_ids)
+    
+    for pid in process_ids:
+        try:
+            # Try to get the process
+            process = psutil.Process(pid)
+            
+            # Kill the process and all its children
+            children = process.children(recursive=True)
+            
+            # Kill children first
+            for child in children:
+                try:
+                    child.terminate()
+                    child.wait(timeout=3)  # Wait up to 3 seconds
+                except psutil.TimeoutExpired:
+                    try:
+                        child.kill()  # Force kill if terminate doesn't work
+                    except psutil.NoSuchProcess:
+                        pass  # Process already dead
+                except psutil.NoSuchProcess:
+                    pass  # Process already dead
+            
+            # Kill the main process
+            try:
+                process.terminate()
+                process.wait(timeout=3)  # Wait up to 3 seconds
+            except psutil.TimeoutExpired:
+                try:
+                    process.kill()  # Force kill if terminate doesn't work
+                except psutil.NoSuchProcess:
+                    pass  # Process already dead
+            except psutil.NoSuchProcess:
+                pass  # Process already dead
+            
+            results["processes_killed"] += 1
+            add_terminal_log("INFO", f"🛑 Killed process {pid} for job {job_id}")
+            
+        except psutil.NoSuchProcess:
+            # Process already dead
+            pass
+        except Exception as e:
+            error_msg = f"Error killing process {pid}: {str(e)}"
+            results["errors"].append(error_msg)
+            add_terminal_log("ERROR", error_msg)
+    
+    return results
+
+def kill_all_python_processes() -> Dict[str, Any]:
+    """Forcefully terminate all Python processes except the current one."""
+    results = {
+        "processes_found": 0,
+        "processes_killed": 0,
+        "errors": []
+    }
+    
+    current_pid = os.getpid()
+    
+    try:
+        # Find all Python processes
+        for proc in psutil.process_iter(['pid', 'name', 'cmdline']):
+            try:
+                if proc.info['name'] and 'python' in proc.info['name'].lower():
+                    pid = proc.info['pid']
+                    
+                    # Skip the current process
+                    if pid == current_pid:
+                        continue
+                    
+                    results["processes_found"] += 1
+                    
+                    # Kill the process and all its children
+                    children = proc.children(recursive=True)
+                    
+                    # Kill children first
+                    for child in children:
+                        try:
+                            child.terminate()
+                            child.wait(timeout=2)  # Wait up to 2 seconds
+                        except psutil.TimeoutExpired:
+                            try:
+                                child.kill()  # Force kill if terminate doesn't work
+                            except psutil.NoSuchProcess:
+                                pass  # Process already dead
+                        except psutil.NoSuchProcess:
+                            pass  # Process already dead
+                    
+                    # Kill the main process
+                    try:
+                        proc.terminate()
+                        proc.wait(timeout=2)  # Wait up to 2 seconds
+                    except psutil.TimeoutExpired:
+                        try:
+                            proc.kill()  # Force kill if terminate doesn't work
+                        except psutil.NoSuchProcess:
+                            pass  # Process already dead
+                    except psutil.NoSuchProcess:
+                        pass  # Process already dead
+                    
+                    results["processes_killed"] += 1
+                    add_terminal_log("INFO", f"🛑 Killed Python process {pid}")
+                    
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                pass  # Process already dead or access denied
+            except Exception as e:
+                error_msg = f"Error killing process {proc.info.get('pid', 'unknown')}: {str(e)}"
+                results["errors"].append(error_msg)
+                add_terminal_log("ERROR", error_msg)
+    
+    except Exception as e:
+        error_msg = f"Error in kill_all_python_processes: {str(e)}"
+        results["errors"].append(error_msg)
+        add_terminal_log("ERROR", error_msg)
+    
+    return results
+
 async def run_extraction_job(job_id: str, config: ExtractionConfig):
     """Run extraction job in background."""
     try:
@@ -534,19 +695,49 @@ async def run_extraction_job(job_id: str, config: ExtractionConfig):
         add_terminal_log("INFO", f"🔍 LinkedIn fields: {config.linkedin_fields}")
         add_terminal_log("INFO", "-" * 60)
         
+        # Check for cancellation before starting
+        if check_cancellation(job_id):
+            extraction_jobs[job_id]["status"] = "cancelled"
+            extraction_jobs[job_id]["completed_at"] = datetime.now()
+            add_terminal_log("INFO", f"⏹️ Extraction cancelled for job {job_id}")
+            return
+        
         # Create extractor with progress callback
         extractor = APIAirtableLinkedInExtractor(job_id, update_job_progress)
         
-        # Run extraction
-        results = extractor.extract_linkedin_urls_with_filters(
-            linkedin_fields=config.linkedin_fields,
-            event_filter=config.event_filter,
-            top_100_filter=config.top_100_filter,
-            output_prefix=config.output_prefix
-        )
+        # Track the current process
+        current_pid = os.getpid()
+        add_process_to_job(job_id, current_pid)
         
-        # Save results with prefix
-        extractor.save_results_with_prefix(config.output_prefix)
+        try:
+            # Run extraction in thread pool to avoid blocking the event loop
+            loop = asyncio.get_event_loop()
+            results = await loop.run_in_executor(
+                None,  # Use default executor (thread pool)
+                extractor.extract_linkedin_urls_with_filters,
+                config.linkedin_fields,
+                config.event_filter,
+                config.top_100_filter,
+                config.output_prefix
+            )
+            
+            # Check for cancellation after extraction
+            if check_cancellation(job_id):
+                extraction_jobs[job_id]["status"] = "cancelled"
+                extraction_jobs[job_id]["completed_at"] = datetime.now()
+                add_terminal_log("INFO", f"⏹️ Extraction cancelled for job {job_id}")
+                return
+                
+        finally:
+            # Remove process from tracking
+            remove_process_from_job(job_id, current_pid)
+        
+        # Save results with prefix in thread pool
+        await loop.run_in_executor(
+            None,
+            extractor.save_results_with_prefix,
+            config.output_prefix
+        )
         
         # Update job status to completed
         extraction_jobs[job_id]["status"] = "completed"
@@ -590,11 +781,14 @@ async def run_apify_job(job_id: str, config: ApifyConfig):
             "timestamp": datetime.now().isoformat()
         })
         
-        # Process URLs through Apify
+        # Process URLs through Apify in thread pool
+        loop = asyncio.get_event_loop()
         if config.test_mode:
             # Test mode - process limited URLs
             test_urls = urls[:config.test_num_urls]
-            results = process_linkedin_profiles_with_resume(
+            results = await loop.run_in_executor(
+                None,
+                process_linkedin_profiles_with_resume,
                 api_token, 
                 test_urls, 
                 config.output_file, 
@@ -602,7 +796,9 @@ async def run_apify_job(job_id: str, config: ApifyConfig):
             )
         else:
             # Full processing mode
-            results = process_linkedin_profiles_with_resume(
+            results = await loop.run_in_executor(
+                None,
+                process_linkedin_profiles_with_resume,
                 api_token, 
                 urls, 
                 config.output_file, 
@@ -650,8 +846,13 @@ async def run_data_cleaner_job(job_id: str, config: DataCleanerConfig):
             "timestamp": datetime.now().isoformat()
         })
         
-        # Load and process profiles
-        cleaned_profiles = processor.load_and_process_file(config.input_file)
+        # Load and process profiles in thread pool
+        loop = asyncio.get_event_loop()
+        cleaned_profiles = await loop.run_in_executor(
+            None,
+            processor.load_and_process_file,
+            config.input_file
+        )
         
         # Update progress
         update_data_cleaner_job_progress(job_id, {
@@ -718,13 +919,16 @@ async def run_trait_extractor_job(job_id: str, config: TraitExtractorConfig):
             "timestamp": datetime.now().isoformat()
         })
         
-        # Extract traits with progress tracking
-        results = extractor.extract_traits_from_profiles(
-            profiles=profiles,
-            delay_between_calls=config.delay_between_calls,
-            max_profiles=config.max_profiles,
-            force_reextraction=config.force_reextraction,
-            output_file=config.output_file
+        # Extract traits with progress tracking in thread pool
+        loop = asyncio.get_event_loop()
+        results = await loop.run_in_executor(
+            None,
+            extractor.extract_traits_from_profiles,
+            profiles,
+            config.delay_between_calls,
+            config.max_profiles,
+            config.force_reextraction,
+            config.output_file
         )
         
         # Update job with results
@@ -793,8 +997,13 @@ async def run_airtable_updater_job(job_id: str, config: AirtableUpdaterConfig):
             "timestamp": datetime.now().isoformat()
         })
         
-        # Process trait extractions and update Airtable
-        updater.process_trait_extractions(delay_between_updates=config.delay_between_updates)
+        # Process trait extractions and update Airtable in thread pool
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,
+            updater.process_trait_extractions,
+            config.delay_between_updates
+        )
         
         # Update job with results
         airtable_updater_jobs[job_id].update({
@@ -956,6 +1165,160 @@ async def delete_job(job_id: str):
     del extraction_jobs[job_id]
     return {"message": f"Job '{job_id}' deleted successfully"}
 
+@app.post("/jobs/{job_id}/cancel")
+async def cancel_job(job_id: str):
+    """Cancel a running job."""
+    if job_id not in extraction_jobs:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Job '{job_id}' not found"
+        )
+    
+    job_data = extraction_jobs[job_id]
+    if job_data["status"] not in ["queued", "running"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Job '{job_id}' cannot be cancelled. Current status: {job_data['status']}"
+        )
+    
+    # Mark job for cancellation
+    cancellation_requests[job_id] = True
+    job_data["status"] = "cancelled"
+    job_data["completed_at"] = datetime.now().isoformat()
+    
+    # Kill all processes associated with this job
+    kill_results = kill_job_processes(job_id)
+    
+    add_terminal_log("INFO", f"Job '{job_id}' cancelled by user")
+    add_terminal_log("INFO", f"Killed {kill_results['processes_killed']} processes for job {job_id}")
+    
+    return {
+        "message": f"Job '{job_id}' cancelled successfully",
+        "processes_killed": kill_results['processes_killed'],
+        "processes_found": kill_results['processes_found']
+    }
+
+@app.post("/cancel-all-jobs")
+async def cancel_all_jobs():
+    """Cancel all running jobs and kill job processes only."""
+    try:
+        # Mark all running jobs for cancellation
+        cancelled_jobs = 0
+        total_processes_killed = 0
+        
+        # Cancel extraction jobs and kill their processes
+        for job_id, job_data in extraction_jobs.items():
+            if job_data["status"] in ["queued", "running"]:
+                cancellation_requests[job_id] = True
+                job_data["status"] = "cancelled"
+                job_data["completed_at"] = datetime.now().isoformat()
+                cancelled_jobs += 1
+                
+                # Kill processes for this specific job
+                kill_results = kill_job_processes(job_id)
+                total_processes_killed += kill_results['processes_killed']
+        
+        # Cancel apify jobs and kill their processes
+        for job_id, job_data in apify_jobs.items():
+            if job_data["status"] in ["queued", "running"]:
+                cancellation_requests[job_id] = True
+                job_data["status"] = "cancelled"
+                job_data["completed_at"] = datetime.now().isoformat()
+                cancelled_jobs += 1
+                
+                # Kill processes for this specific job
+                kill_results = kill_job_processes(job_id)
+                total_processes_killed += kill_results['processes_killed']
+        
+        # Cancel data cleaner jobs and kill their processes
+        for job_id, job_data in data_cleaner_jobs.items():
+            if job_data["status"] in ["queued", "running"]:
+                cancellation_requests[job_id] = True
+                job_data["status"] = "cancelled"
+                job_data["completed_at"] = datetime.now().isoformat()
+                cancelled_jobs += 1
+                
+                # Kill processes for this specific job
+                kill_results = kill_job_processes(job_id)
+                total_processes_killed += kill_results['processes_killed']
+        
+        # Cancel trait extractor jobs and kill their processes
+        for job_id, job_data in trait_extractor_jobs.items():
+            if job_data["status"] in ["queued", "running"]:
+                cancellation_requests[job_id] = True
+                job_data["status"] = "cancelled"
+                job_data["completed_at"] = datetime.now().isoformat()
+                cancelled_jobs += 1
+                
+                # Kill processes for this specific job
+                kill_results = kill_job_processes(job_id)
+                total_processes_killed += kill_results['processes_killed']
+        
+        # Cancel airtable updater jobs and kill their processes
+        for job_id, job_data in airtable_updater_jobs.items():
+            if job_data["status"] in ["queued", "running"]:
+                cancellation_requests[job_id] = True
+                job_data["status"] = "cancelled"
+                job_data["completed_at"] = datetime.now().isoformat()
+                cancelled_jobs += 1
+                
+                # Kill processes for this specific job
+                kill_results = kill_job_processes(job_id)
+                total_processes_killed += kill_results['processes_killed']
+        
+        add_terminal_log("INFO", f"Emergency stop: Cancelled {cancelled_jobs} jobs")
+        add_terminal_log("INFO", f"Emergency stop: Killed {total_processes_killed} job processes")
+        
+        return {
+            "message": "All jobs cancelled and job processes killed",
+            "jobs_cancelled": cancelled_jobs,
+            "processes_killed": total_processes_killed
+        }
+        
+    except Exception as e:
+        add_terminal_log("ERROR", f"Error in cancel_all_jobs: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to cancel all jobs: {str(e)}"
+        )
+
+@app.post("/emergency-restart")
+async def emergency_restart():
+    """Emergency restart - kills all processes and restarts services."""
+    try:
+        add_terminal_log("INFO", "🚨 Emergency restart initiated")
+        
+        # Get the directory of the current script
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        batch_file = os.path.join(current_dir, "emergency_restart_services.bat")
+        
+        if not os.path.exists(batch_file):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Emergency restart batch file not found"
+            )
+        
+        # Execute the batch file in a new process
+        # Use subprocess.Popen to start it without waiting
+        subprocess.Popen([batch_file], 
+                        cwd=current_dir,
+                        creationflags=subprocess.CREATE_NEW_CONSOLE if os.name == 'nt' else 0)
+        
+        add_terminal_log("INFO", "🔄 Emergency restart batch file executed")
+        
+        return {
+            "message": "Emergency restart initiated",
+            "status": "restarting",
+            "note": "Services will restart in a new window. Please wait for them to come back online."
+        }
+        
+    except Exception as e:
+        add_terminal_log("ERROR", f"Error in emergency restart: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to initiate emergency restart: {str(e)}"
+        )
+
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
@@ -1096,6 +1459,31 @@ async def delete_apify_job(job_id: str):
     del apify_jobs[job_id]
     return {"message": f"Apify job '{job_id}' deleted successfully"}
 
+@app.post("/apify/jobs/{job_id}/cancel")
+async def cancel_apify_job(job_id: str):
+    """Cancel a running Apify job."""
+    if job_id not in apify_jobs:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Apify job '{job_id}' not found"
+        )
+    
+    job_data = apify_jobs[job_id]
+    if job_data["status"] not in ["queued", "running"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Apify job '{job_id}' cannot be cancelled. Current status: {job_data['status']}"
+        )
+    
+    # Mark job for cancellation
+    cancellation_requests[job_id] = True
+    job_data["status"] = "cancelled"
+    job_data["completed_at"] = datetime.now().isoformat()
+    
+    add_terminal_log("info", f"Apify job '{job_id}' cancelled by user")
+    
+    return {"message": f"Apify job '{job_id}' cancelled successfully"}
+
 # Data Cleaner Endpoints
 @app.post("/cleaner/process", response_model=Dict[str, str])
 async def start_data_cleaning(
@@ -1201,6 +1589,31 @@ async def delete_data_cleaner_job(job_id: str):
     
     del data_cleaner_jobs[job_id]
     return {"message": f"Data cleaner job '{job_id}' deleted successfully"}
+
+@app.post("/cleaner/jobs/{job_id}/cancel")
+async def cancel_data_cleaner_job(job_id: str):
+    """Cancel a running data cleaner job."""
+    if job_id not in data_cleaner_jobs:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Data cleaner job '{job_id}' not found"
+        )
+    
+    job_data = data_cleaner_jobs[job_id]
+    if job_data["status"] not in ["queued", "running"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Data cleaner job '{job_id}' cannot be cancelled. Current status: {job_data['status']}"
+        )
+    
+    # Mark job for cancellation
+    cancellation_requests[job_id] = True
+    job_data["status"] = "cancelled"
+    job_data["completed_at"] = datetime.now().isoformat()
+    
+    add_terminal_log("info", f"Data cleaner job '{job_id}' cancelled by user")
+    
+    return {"message": f"Data cleaner job '{job_id}' cancelled successfully"}
 
 # Trait Extractor Endpoints
 @app.post("/traits/process", response_model=Dict[str, str])
@@ -1308,6 +1721,31 @@ async def delete_trait_extractor_job(job_id: str):
     del trait_extractor_jobs[job_id]
     return {"message": f"Trait extractor job '{job_id}' deleted successfully"}
 
+@app.post("/traits/jobs/{job_id}/cancel")
+async def cancel_trait_extractor_job(job_id: str):
+    """Cancel a running trait extractor job."""
+    if job_id not in trait_extractor_jobs:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Trait extractor job '{job_id}' not found"
+        )
+    
+    job_data = trait_extractor_jobs[job_id]
+    if job_data["status"] not in ["queued", "running"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Trait extractor job '{job_id}' cannot be cancelled. Current status: {job_data['status']}"
+        )
+    
+    # Mark job for cancellation
+    cancellation_requests[job_id] = True
+    job_data["status"] = "cancelled"
+    job_data["completed_at"] = datetime.now().isoformat()
+    
+    add_terminal_log("info", f"Trait extractor job '{job_id}' cancelled by user")
+    
+    return {"message": f"Trait extractor job '{job_id}' cancelled successfully"}
+
 # Airtable Updater Endpoints
 @app.post("/airtable/update", response_model=Dict[str, str])
 async def start_airtable_update(
@@ -1413,6 +1851,31 @@ async def delete_airtable_updater_job(job_id: str):
     
     del airtable_updater_jobs[job_id]
     return {"message": f"Airtable updater job '{job_id}' deleted successfully"}
+
+@app.post("/airtable/jobs/{job_id}/cancel")
+async def cancel_airtable_updater_job(job_id: str):
+    """Cancel a running Airtable updater job."""
+    if job_id not in airtable_updater_jobs:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Airtable updater job '{job_id}' not found"
+        )
+    
+    job_data = airtable_updater_jobs[job_id]
+    if job_data["status"] not in ["queued", "running"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Airtable updater job '{job_id}' cannot be cancelled. Current status: {job_data['status']}"
+        )
+    
+    # Mark job for cancellation
+    cancellation_requests[job_id] = True
+    job_data["status"] = "cancelled"
+    job_data["completed_at"] = datetime.now().isoformat()
+    
+    add_terminal_log("info", f"Airtable updater job '{job_id}' cancelled by user")
+    
+    return {"message": f"Airtable updater job '{job_id}' cancelled successfully"}
 
 if __name__ == "__main__":
     import uvicorn

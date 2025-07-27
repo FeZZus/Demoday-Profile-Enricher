@@ -159,6 +159,22 @@ export const apiService = {
     }
   },
 
+  // Cancel job
+  async cancelJob(jobId) {
+    try {
+      const response = await api.post(`/jobs/${jobId}/cancel`);
+      return response.data;
+    } catch (error) {
+      if (error.response?.status === 404) {
+        throw new Error(`Job '${jobId}' not found`);
+      }
+      if (error.response?.status === 400) {
+        throw new Error(error.response.data.detail || `Job '${jobId}' cannot be cancelled`);
+      }
+      throw new Error(`Failed to cancel job: ${error.message}`);
+    }
+  },
+
   // Poll job status until completion
   async pollJobStatus(job_id, onProgress = null, maxAttempts = 300) {
     let attempts = 0;
@@ -256,6 +272,22 @@ export const apiService = {
         throw new Error(`Apify job '${jobId}' not found`);
       }
       throw new Error(`Failed to delete Apify job: ${error.message}`);
+    }
+  },
+
+  // Cancel Apify job
+  async cancelApifyJob(jobId) {
+    try {
+      const response = await api.post(`/apify/jobs/${jobId}/cancel`);
+      return response.data;
+    } catch (error) {
+      if (error.response?.status === 404) {
+        throw new Error(`Apify job '${jobId}' not found`);
+      }
+      if (error.response?.status === 400) {
+        throw new Error(error.response.data.detail || `Apify job '${jobId}' cannot be cancelled`);
+      }
+      throw new Error(`Failed to cancel Apify job: ${error.message}`);
     }
   },
 
@@ -360,6 +392,22 @@ export const apiService = {
         throw new Error(`Data cleaner job '${jobId}' not found`);
       }
       throw new Error(`Failed to delete data cleaner job: ${error.message}`);
+    }
+  },
+
+  // Cancel data cleaner job
+  async cancelDataCleanerJob(jobId) {
+    try {
+      const response = await api.post(`/cleaner/jobs/${jobId}/cancel`);
+      return response.data;
+    } catch (error) {
+      if (error.response?.status === 404) {
+        throw new Error(`Data cleaner job '${jobId}' not found`);
+      }
+      if (error.response?.status === 400) {
+        throw new Error(error.response.data.detail || `Data cleaner job '${jobId}' cannot be cancelled`);
+      }
+      throw new Error(`Failed to cancel data cleaner job: ${error.message}`);
     }
   },
 
@@ -470,6 +518,22 @@ export const apiService = {
     }
   },
 
+  // Cancel trait extractor job
+  async cancelTraitExtractorJob(jobId) {
+    try {
+      const response = await api.post(`/traits/jobs/${jobId}/cancel`);
+      return response.data;
+    } catch (error) {
+      if (error.response?.status === 404) {
+        throw new Error(`Trait extractor job '${jobId}' not found`);
+      }
+      if (error.response?.status === 400) {
+        throw new Error(error.response.data.detail || `Trait extractor job '${jobId}' cannot be cancelled`);
+      }
+      throw new Error(`Failed to cancel trait extractor job: ${error.message}`);
+    }
+  },
+
   // Poll trait extractor job status with progress callback
   async pollTraitExtractorJobStatus(jobId, onProgress = null, maxAttempts = 300) {
     let attempts = 0;
@@ -575,6 +639,22 @@ export const apiService = {
     }
   },
 
+  // Cancel Airtable updater job
+  async cancelAirtableUpdaterJob(jobId) {
+    try {
+      const response = await api.post(`/airtable/jobs/${jobId}/cancel`);
+      return response.data;
+    } catch (error) {
+      if (error.response?.status === 404) {
+        throw new Error(`Airtable updater job '${jobId}' not found`);
+      }
+      if (error.response?.status === 400) {
+        throw new Error(error.response.data.detail || `Airtable updater job '${jobId}' cannot be cancelled`);
+      }
+      throw new Error(`Failed to cancel Airtable updater job: ${error.message}`);
+    }
+  },
+
   // Poll Airtable updater job status with progress callback
   async pollAirtableUpdaterJobStatus(jobId, onProgress = null, maxAttempts = 300) {
     let attempts = 0;
@@ -605,6 +685,35 @@ export const apiService = {
     }
     
     throw new Error(`Airtable updater job ${jobId} did not complete within the expected time`);
+  },
+
+  // Emergency restart - kills all processes and restarts services
+  async emergencyRestart() {
+    try {
+      const response = await api.post('/emergency-restart', {}, { timeout: 15000 }); // 15 second timeout
+
+      return response.data;
+    } catch (error) {
+      if (error.code === 'ECONNABORTED') {
+        throw new Error('Emergency restart request timed out. The restart may have been initiated.');
+      }
+      throw new Error(`Failed to initiate emergency restart: ${error.message}`);
+    }
+  },
+
+  // Cancel all running jobs across all job types
+  async cancelAllRunningJobs() {
+    try {
+      // Use the new backend endpoint that kills job processes only
+      const response = await api.post('/cancel-all-jobs', {}, { timeout: 10000 }); // 10 second timeout
+
+      return response.data;
+    } catch (error) {
+      if (error.code === 'ECONNABORTED') {
+        throw new Error('Cancel all jobs request timed out. The operation may have partially completed.');
+      }
+      throw new Error(`Failed to cancel all running jobs: ${error.message}`);
+    }
   },
 };
 

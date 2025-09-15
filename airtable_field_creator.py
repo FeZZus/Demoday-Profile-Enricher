@@ -14,21 +14,18 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
-BASE_ID = 'appCicrQbZaRq1Tvo'
-TABLE_ID = 'tblIJ47Fniuu9EJat'
-
 class AirtableFieldCreator:
     """Create missing AI fields in Airtable."""
     
-    def __init__(self, BASE_ID, TABLE_ID):
+    def __init__(self, base_id: str, table_id: str):
         """Initialize the Airtable connection."""
         self.api_key = os.getenv('AIRTABLE_API_KEY')
         if not self.api_key:
             raise ValueError("AIRTABLE_API_KEY environment variable not set")
         
         self.api = Api(self.api_key)
-        self.base_id = BASE_ID
-        self.table_id = TABLE_ID
+        self.base_id = base_id
+        self.table_id = table_id
         self.table = self.api.table(self.base_id, self.table_id)
     
     def get_field_definitions(self):
@@ -47,7 +44,6 @@ class AirtableFieldCreator:
             }},
             
             # Education fields
-            {'name': 'AI_Founder_Experience_Count', 'type': 'number', 'options': {'precision': 0}},
             {'name': 'AI_Undergraduate', 'type': 'multilineText'},
             {'name': 'AI_Masters', 'type': 'multilineText'},
             {'name': 'AI_PhD', 'type': 'multilineText'},
@@ -168,11 +164,16 @@ class AirtableFieldCreator:
 
 def main():
     """Main execution function."""
+    import argparse
     
+    parser = argparse.ArgumentParser(description='Create missing AI fields in Airtable')
+    parser.add_argument('--base-id', default='appCicrQbZaRq1Tvo', help='Airtable base ID')
+    parser.add_argument('--table-id', default='tblpzAcC0vMMibdca', help='Airtable table ID')
     
-
+    args = parser.parse_args()
+    
     try:
-        creator = AirtableFieldCreator(BASE_ID, TABLE_ID)
+        creator = AirtableFieldCreator(args.base_id, args.table_id)
         success = creator.create_missing_fields()
         
         if success:

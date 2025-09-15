@@ -32,10 +32,12 @@ from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from airtable_extractor import AirtableLinkedInExtractor
-from apify_requester import process_linkedin_profiles_with_resume, load_linkedin_urls
+from apify_requester import process_linkedin_profiles_with_resume, load_linkedin_urls, load_progress, save_progress, get_remaining_urls
+import os
 from data_cleaner import LinkedInDataProcessor
 from trait_extractor import LinkedInTraitExtractor
 from airtable_updater import AirtableTraitUpdater
+from pyairtable import Api
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -106,6 +108,14 @@ class ExtractionConfig(BaseModel):
         default="test",
         description="Prefix for output filenames"
     )
+    base_id: str = Field(
+        default="appCicrQbZaRq1Tvo",
+        description="Airtable base ID to connect to"
+    )
+    table_id: str = Field(
+        default="tblIJ47Fniuu9EJat",
+        description="Airtable table ID to connect to"
+    )
 
 # Whenever a client sends an endpoint with data as {"config": ..., "job_id": ..}, fast api:
     # Parses it into a Extraction request instance,
@@ -156,7 +166,7 @@ class ApifyConfig(BaseModel):
         description="Path to save the processed profile data"
     )
     batch_size: int = Field(
-        default=50,
+        default=20,
         description="Number of URLs to process in each batch"
     )
     test_mode: bool = Field(
@@ -166,6 +176,10 @@ class ApifyConfig(BaseModel):
     test_num_urls: int = Field(
         default=10,
         description="Number of URLs to process in test mode"
+    )
+    force_restart: bool = Field(
+        default=False,
+        description="Force restart processing from beginning, ignoring existing progress"
     )
 
 class ApifyRequest(BaseModel):
@@ -270,6 +284,14 @@ class AirtableUpdaterConfig(BaseModel):
         default=0.5,
         description="Delay between Airtable API calls in seconds"
     )
+    base_id: str = Field(
+        default="appCicrQbZaRq1Tvo",
+        description="Airtable base ID to connect to"
+    )
+    table_id: str = Field(
+        default="tblIJ47Fniuu9EJat",
+        description="Airtable table ID to connect to"
+    )
 
 class AirtableUpdaterRequest(BaseModel):
     """Request model for starting an Airtable update job."""
@@ -293,8 +315,24 @@ class AirtableUpdaterStatus(BaseModel):
 class APIAirtableLinkedInExtractor(AirtableLinkedInExtractor):
     """Enhanced extractor with progress tracking for API use."""
     
-    def __init__(self, job_id: str, progress_callback=None):
-        super().__init__()
+    def __init__(self, job_id: str, progress_callback=None, base_id: str = "appCicrQbZaRq1Tvo", table_id: str = "tblIJ47Fniuu9EJat"):
+        # Initialize the parent class with custom base_id and table_id
+        self.api_key = os.getenv('AIRTABLE_API_KEY')
+        if not self.api_key:
+            raise ValueError("AIRTABLE_API_KEY environment variable not set")
+        
+        self.api = Api(self.api_key)
+        self.base_id = base_id
+        self.table_id = table_id
+        self.table = self.api.table(self.base_id, self.table_id)
+        
+        # Initialize other attributes from parent class
+        self.url_to_record_mapping: Dict[str, str] = {}
+        self.valid_urls: List[str] = []
+        self.invalid_urls: List[str] = []
+        self.missing_urls: List[str] = {}  # record_id -> reason
+        
+        # API-specific attributes
         self.job_id = job_id
         self.progress_callback = progress_callback
         self.total_processed = 0
@@ -352,17 +390,15 @@ class APIAirtableLinkedInExtractor(AirtableLinkedInExtractor):
                     fields = record.get('fields', {})
                     
                     # Apply filters
-                    filter_conditions = {}
-                    if event_filter:
-                        filter_conditions['Event'] = event_filter
-                    if top_100_filter is not None:
-                        filter_conditions['Top 100'] = top_100_filter
-                    
                     matches_filter = True
-                    for filter_key, filter_value in filter_conditions.items():
-                        if filter_key not in fields or fields[filter_key] != filter_value:
-                            matches_filter = False
-                            break
+                    
+                    # Check Event filter
+                    if event_filter and ('Event' not in fields or fields['Event'].strip() != event_filter):
+                        matches_filter = False
+                    
+                    # Check Top 100 filter
+                    if top_100_filter and ('Top 100' not in fields or not fields['Top 100']):
+                        matches_filter = False
                     
                     if not matches_filter:
                         continue
@@ -702,8 +738,13 @@ async def run_extraction_job(job_id: str, config: ExtractionConfig):
             add_terminal_log("INFO", f"⏹️ Extraction cancelled for job {job_id}")
             return
         
-        # Create extractor with progress callback
-        extractor = APIAirtableLinkedInExtractor(job_id, update_job_progress)
+        # Create extractor with progress callback and custom base/table IDs
+        extractor = APIAirtableLinkedInExtractor(
+            job_id, 
+            update_job_progress, 
+            base_id=config.base_id, 
+            table_id=config.table_id
+        )
         
         # Track the current process
         current_pid = os.getpid()
@@ -757,7 +798,7 @@ async def run_extraction_job(job_id: str, config: ExtractionConfig):
         print(f"Extraction job {job_id} failed: {e}")
 
 async def run_apify_job(job_id: str, config: ApifyConfig):
-    """Background task to run Apify processing job."""
+    """Background task to run Apify processing job with resume capability."""
     try:
         # Update job status
         apify_jobs[job_id]["status"] = "running"
@@ -772,25 +813,77 @@ async def run_apify_job(job_id: str, config: ApifyConfig):
         if not urls:
             raise Exception(f"No URLs found in {config.urls_file}")
         
+        # Set up progress tracking
+        progress_file = config.output_file.replace('.json', '_progress.json')
+        
+        # Clear progress if force_restart is enabled
+        if config.force_restart:
+            if os.path.exists(progress_file):
+                os.remove(progress_file)
+                add_terminal_log("INFO", f"🗑️ Cleared progress file for job {job_id} (force restart enabled)")
+        
+        processed_urls = load_progress(progress_file)
+        remaining_urls = get_remaining_urls(urls, processed_urls)
+        
         # Update progress with initial stats
         update_apify_job_progress(job_id, {
             "message": f"Loaded {len(urls)} URLs from {config.urls_file}",
             "total_urls": len(urls),
-            "processed_urls": 0,
-            "percentage": 0,
+            "processed_urls": len(processed_urls),
+            "remaining_urls": len(remaining_urls),
+            "percentage": (len(processed_urls) / len(urls) * 100) if urls else 0,
             "timestamp": datetime.now().isoformat()
         })
+        
+        # Check if all URLs are already processed
+        if not remaining_urls:
+            add_terminal_log("INFO", f"✅ All URLs have already been processed for job {job_id}")
+            apify_jobs[job_id].update({
+                "status": "completed",
+                "completed_at": datetime.now(),
+                "results": {
+                    "total_urls": len(urls),
+                    "processed_profiles": len(processed_urls),
+                    "output_file": config.output_file,
+                    "test_mode": config.test_mode,
+                    "resumed": True
+                }
+            })
+            return
+        
+        # Log resume information
+        if len(processed_urls) > 0:
+            add_terminal_log("INFO", f"🔄 RESUMING Apify job {job_id} from {len(processed_urls)} completed profiles")
+            add_terminal_log("INFO", f"📊 Progress: {len(processed_urls)}/{len(urls)} processed ({len(remaining_urls)} remaining)")
+        else:
+            add_terminal_log("INFO", f"🚀 STARTING new Apify job {job_id} for {len(urls)} URLs")
         
         # Process URLs through Apify in thread pool
         loop = asyncio.get_event_loop()
         if config.test_mode:
             # Test mode - process limited URLs
             test_urls = urls[:config.test_num_urls]
+            remaining_test_urls = get_remaining_urls(test_urls, processed_urls)
+            if not remaining_test_urls:
+                add_terminal_log("INFO", f"✅ All test URLs already processed for job {job_id}")
+                apify_jobs[job_id].update({
+                    "status": "completed",
+                    "completed_at": datetime.now(),
+                    "results": {
+                        "total_urls": len(test_urls),
+                        "processed_profiles": len(processed_urls),
+                        "output_file": config.output_file,
+                        "test_mode": config.test_mode,
+                        "resumed": True
+                    }
+                })
+                return
+            
             results = await loop.run_in_executor(
                 None,
                 process_linkedin_profiles_with_resume,
                 api_token, 
-                test_urls, 
+                remaining_test_urls, 
                 config.output_file, 
                 config.batch_size
             )
@@ -800,7 +893,7 @@ async def run_apify_job(job_id: str, config: ApifyConfig):
                 None,
                 process_linkedin_profiles_with_resume,
                 api_token, 
-                urls, 
+                remaining_urls, 
                 config.output_file, 
                 config.batch_size
             )
@@ -813,9 +906,12 @@ async def run_apify_job(job_id: str, config: ApifyConfig):
                 "total_urls": len(urls),
                 "processed_profiles": len(results) if results else 0,
                 "output_file": config.output_file,
-                "test_mode": config.test_mode
+                "test_mode": config.test_mode,
+                "resumed": len(processed_urls) > 0
             }
         })
+        
+        add_terminal_log("INFO", f"✅ Apify job {job_id} completed successfully")
         
     except Exception as e:
         # Update job with error
@@ -824,6 +920,8 @@ async def run_apify_job(job_id: str, config: ApifyConfig):
             "completed_at": datetime.now(),
             "error": str(e)
         })
+        
+        add_terminal_log("ERROR", f"❌ Apify job {job_id} failed: {str(e)}")
 
 async def run_data_cleaner_job(job_id: str, config: DataCleanerConfig):
     """Background task to run data cleaning job."""
@@ -928,6 +1026,7 @@ async def run_trait_extractor_job(job_id: str, config: TraitExtractorConfig):
             config.delay_between_calls,
             config.max_profiles,
             config.force_reextraction,
+            None,  # progress_file - let the method auto-generate it
             config.output_file
         )
         
@@ -965,8 +1064,8 @@ async def run_airtable_updater_job(job_id: str, config: AirtableUpdaterConfig):
             "timestamp": datetime.now().isoformat()
         })
         
-        # Initialize Airtable updater
-        updater = AirtableTraitUpdater()
+        # Initialize Airtable updater with custom base_id and table_id
+        updater = AirtableTraitUpdater(base_id=config.base_id, table_id=config.table_id)
         
         # Update progress
         update_airtable_updater_job_progress(job_id, {
@@ -1352,6 +1451,22 @@ async def clear_terminal_logs():
     global terminal_logs
     terminal_logs.clear()
     return {"message": "Terminal logs cleared successfully"}
+
+def clear_apify_progress(output_file: str):
+    """Clear progress for a specific Apify job."""
+    progress_file = output_file.replace('.json', '_progress.json')
+    if os.path.exists(progress_file):
+        os.remove(progress_file)
+        add_terminal_log("INFO", f"🗑️ Cleared progress file: {progress_file}")
+        return {"message": f"Progress cleared for {output_file}"}
+    else:
+        add_terminal_log("INFO", f"ℹ️ No progress file to clear: {progress_file}")
+        return {"message": f"No progress file found for {output_file}"}
+
+@app.post("/apify/clear-progress")
+async def clear_apify_progress_endpoint(output_file: str):
+    """Clear progress for a specific Apify job."""
+    return clear_apify_progress(output_file)
 
 # Apify Processing Endpoints
 @app.post("/apify/process", response_model=Dict[str, str])

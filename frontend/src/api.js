@@ -86,12 +86,25 @@ export const apiService = {
   // Start extraction job
   async startExtraction(config = {}) {
     try {
+      // Generate default prefix based on event filter and top 100 filter
+      const generateDefaultPrefix = (eventFilter, top100Filter) => {
+        const event = eventFilter || "S25";
+        const suffix = top100Filter ? "Top100" : "All";
+        return `${event}${suffix}`;
+      };
+      
+      const eventFilter = config.event_filter || "S25";
+      const top100Filter = config.top_100_filter !== undefined ? config.top_100_filter : true;
+      const defaultPrefix = generateDefaultPrefix(eventFilter, top100Filter);
+      
       const response = await api.post('/extract', {
         config: {
           linkedin_fields: config.linkedin_fields || ["4. CEO LinkedIn"],
-          event_filter: config.event_filter || "S25",
-          top_100_filter: config.top_100_filter !== undefined ? config.top_100_filter : true,
-          output_prefix: config.output_prefix || "S25Top100",
+          event_filter: eventFilter,
+          top_100_filter: top100Filter,
+          output_prefix: config.output_prefix || defaultPrefix,
+          base_id: config.base_id || "appCicrQbZaRq1Tvo",
+          table_id: config.table_id || "tblIJ47Fniuu9EJat",
         },
         job_id: config.job_id || null,
       });
@@ -574,6 +587,8 @@ export const apiService = {
           traits_file: config.traits_file || "final-trait-extractions/S25Top100_comprehensive_traits.json",
           url_mapping_file: config.url_mapping_file || "airtable-extractions/S25Top100airtable_url_mapping.json",
           delay_between_updates: config.delay_between_updates || 0.5,
+          base_id: config.base_id || "appCicrQbZaRq1Tvo",
+          table_id: config.table_id || "tblIJ47Fniuu9EJat",
         },
         job_id: config.job_id || null,
       });

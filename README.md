@@ -1,207 +1,49 @@
-# LinkedIn Profile Enricher
+Theres a notion file in my workspace "Onstage Summer 25" 
 
-A Python tool that processes LinkedIn profile data to extract key professional traits using OpenAI's API. This tool cleans raw LinkedIn profile data and extracts structured information about education, work experience, startup involvement, and notable career achievements.
+# To run
 
-## Features
+- Activate the venv with `.\venv\Scripts\activate`
+- then type in this: `.\emergency restart bat thing`
+    - activates both front end and backend
+- clicking each task once is enoguh - theres o output to show its running bar the terminal or the jobs page
 
-- **Data Cleaning**: Removes irrelevant sections like profile pictures, interests, recommendations, and media links
-- **Trait Extraction**: Uses OpenAI's API to extract structured professional information
-- **Rate Limiting**: Built-in API call throttling to respect OpenAI's rate limits
-- **Batch Processing**: Process multiple profiles efficiently
-- **Confidence Scoring**: Provides confidence levels for extracted data
-- **Detailed Reporting**: Summary statistics and detailed results
+https://airtable.com/appCicrQbZaRq1Tvo/api/docs#curl/table:startups —> get the base id and table id from here. These can be updated in the GlobalSettings.js file to set the default values to not have to re-enter them each time 
 
-## Extracted Traits
+### 1. “Extract url’s” from airtable —> Airtable_extractor.py
 
-The tool extracts the following information from each LinkedIn profile:
+- Give it the table id and the base id
+- Then can just go through each stage and click go
+- Setting the things at the top sets the prefixes for everything
+- **Current issue:** Deleting the global prefix will cause it to reset itself which is stupid. but just delete part of it then type the part then delete the overhalf
 
-- **University + Degree**: Educational background
-- **Most Recent 2 Roles**: Job titles and companies
-- **Startup Experience**: Whether the person has startup experience (Yes/No)
-- **Founder Status**: Whether the person was previously a founder (Yes/No)
-- **Notable Companies**: FAANG, unicorns, or top-tier companies
-- **Accelerators/Programs**: Y Combinator, Techstars, On Deck, etc.
+### 2. “Process with apify” —> apify_requester.py
 
-## Installation
+- Takes all the url’s, and runs them throguh apify
+- this takes ages
+- Costs £10 per 1000 results. so effectively 1p per person
+- **Many of these can be run in parallel** - i think all can be run at same time without issues
 
-1. **Clone or download the project files**
-2. **Install dependencies**:
-   ```bash
-   pip install -r requirements.txt
-   ```
+### 3. Data cleaner:
 
-3. **Set up OpenAI API Key**:
-   - Get an API key from [OpenAI](https://platform.openai.com/api-keys)
-   - Option 1: Set environment variable
-     ```bash
-     export OPENAI_API_KEY="your-api-key-here"
-     ```
-   - Option 2: Pass directly via command line (see usage below)
+- The apify linked in data is full of a lot of hyperlinks and bs
+- So we clean it to just get the values of interest to us
+- data_cleaner.py
 
-## Usage
+### 4. Trait Extractor:
 
-### Basic Usage
+- Then the data is ran through gpt to extract traits from the data —> trait_extractor.py
+- This is very slow
+- Takes  a while but fairly cheap. took £5 to run like 15,000 profiles. Better models can be used ig in the future
 
-```bash
-python main.py --input dataset_Linkedin-Profile-Scraper_2025-07-16_23-43-11-086.json
-```
+### 5. “Airtable_field_creator.py” have to run manually:
 
-### Advanced Usage
+- Have to run manually throguht the terminal
+- Make sure venv is loaded first
+- Also check that the base id and table id in main() is correct before running.
+- Some of the values don’t work - the checkbox ones - so they have to be manually inserted into the airtable base
 
-```bash
-# Specify output file and API key
-python main.py --input dataset.json --output results.json --api-key sk-your-key-here
+### 6. Update Airtable —> updates the base.
 
-# Process with custom rate limiting (2 second delays)
-python main.py --input dataset.json --delay 2.0
-
-# Process only first 5 profiles (for testing)
-python main.py --input dataset.json --max-profiles 5
-
-# Save cleaned data and enable verbose output
-python main.py --input dataset.json --save-cleaned --verbose
-```
-
-### Command Line Arguments
-
-- `--input, -i`: Path to input LinkedIn dataset JSON file (required)
-- `--output, -o`: Path to output file (default: extracted_traits.json)
-- `--api-key`: OpenAI API key (or use OPENAI_API_KEY env var)
-- `--delay`: Delay between API calls in seconds (default: 1.0)
-- `--save-cleaned`: Save cleaned profile data to file
-- `--max-profiles`: Limit number of profiles to process
-- `--verbose, -v`: Enable detailed output
-
-## File Structure
-
-```
-linkedin-profile-enricher/
-├── main.py                    # Main entry point
-├── data_processor.py          # Data cleaning and processing
-├── trait_extractor.py         # OpenAI API integration
-├── requirements.txt           # Python dependencies
-├── README.md                  # This file
-└── dataset_*.json            # Input LinkedIn data
-```
-
-## Input Format
-
-The tool expects a JSON file containing an array of LinkedIn profile objects. Each profile should have the following structure:
-
-```json
-[
-  {
-    "firstName": "John",
-    "lastName": "Doe",
-    "fullName": "John Doe",
-    "headline": "Software Engineer at Company",
-    "about": "Bio text...",
-    "experiences": [...],
-    "educations": [...],
-    "skills": [...],
-    ...
-  }
-]
-```
-
-## Output Format
-
-The tool generates a JSON file with extracted traits:
-
-```json
-[
-  {
-    "full_name": "John Doe",
-    "university_degree": "Stanford University - BS Computer Science",
-    "recent_roles": [
-      {"title": "Senior Software Engineer", "company": "Tech Corp"},
-      {"title": "Software Engineer", "company": "StartupXYZ"}
-    ],
-    "has_startup_experience": true,
-    "was_founder": false,
-    "notable_companies": ["Google", "Meta"],
-    "accelerators_programs": ["Y Combinator"],
-    "confidence_score": "High"
-  }
-]
-```
-
-## Data Processing
-
-### What Gets Removed
-
-The data processor removes the following to reduce noise:
-- Profile pictures and media URLs
-- Interests and languages sections  
-- Recommendations and endorsements
-- LinkedIn post updates
-- Contact information (email, phone)
-- Address information
-- Media components in experience descriptions
-- Various metadata and IDs
-
-### What Gets Kept
-
-The following information is preserved for trait extraction:
-- Basic profile information (name, headline)
-- About/bio section
-- Work experiences with titles, companies, and descriptions
-- Education history
-- Skills list
-- Current job information
-
-## API Usage and Costs
-
-- Uses OpenAI's `gpt-4o-mini` model for cost efficiency
-- Typical cost: ~$0.01-0.02 per profile
-- Built-in rate limiting (1 second delay by default)
-- Retry logic with exponential backoff
-- Processes 2 profiles from your dataset = ~$0.02-0.04
-
-## Error Handling
-
-The tool includes robust error handling:
-- API key validation
-- JSON parsing errors
-- Rate limit handling
-- Network error recovery
-- Malformed response handling
-
-## Example Processing Flow
-
-1. **Load Data**: Read LinkedIn profile JSON file
-2. **Clean Data**: Remove irrelevant sections and media links
-3. **Extract Traits**: Use OpenAI API to extract structured information
-4. **Save Results**: Output clean JSON with extracted traits
-5. **Generate Summary**: Display processing statistics
-
-## Limitations
-
-- Requires OpenAI API access (paid service)
-- Quality depends on completeness of input LinkedIn data
-- Rate limited by OpenAI API constraints
-- Results depend on AI model performance
-
-## Troubleshooting
-
-### Common Issues
-
-1. **API Key Error**: Ensure OpenAI API key is set correctly
-2. **Rate Limiting**: Increase `--delay` if hitting rate limits
-3. **JSON Errors**: Check input file format
-4. **Memory Issues**: Process in smaller batches using `--max-profiles`
-
-### Debug Mode
-
-Enable verbose output for debugging:
-```bash
-python main.py --input dataset.json --verbose
-```
-
-## Contributing
-
-Feel free to submit issues, feature requests, or pull requests to improve the tool.
-
-## License
-
-This project is open source. Use responsibly and in accordance with OpenAI's usage policies. 
+- It shoudl mostly just work
+- Rate limited to 5 requests per second. Currently operating at 0.5 seconds delay per request. so tbh it coud be move to like 0.25 without much issue.
+- airtable_updater.py

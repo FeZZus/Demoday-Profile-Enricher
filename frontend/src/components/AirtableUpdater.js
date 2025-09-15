@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { apiService } from '../api';
 
-const AirtableUpdater = ({ globalPrefix, onJobStarted, onError }) => {
+const AirtableUpdater = ({ globalPrefix, globalBaseId, globalTableId, onJobStarted, onError }) => {
   const [formData, setFormData] = useState({
     traits_file: `final-trait-extractions/${globalPrefix || 'S25Top100'}_comprehensive_traits.json`,
     url_mapping_file: `airtable-extractions/${globalPrefix || 'S25Top100'}airtable_url_mapping.json`,
     delay_between_updates: 0.5,
+    base_id: globalBaseId || "appCicrQbZaRq1Tvo",
+    table_id: globalTableId || "tblIJ47Fniuu9EJat",
   });
 
   const [isLoading, setIsLoading] = useState(false);
@@ -16,8 +18,10 @@ const AirtableUpdater = ({ globalPrefix, onJobStarted, onError }) => {
       ...prev,
       traits_file: `final-trait-extractions/${globalPrefix || 'S25Top100'}_comprehensive_traits.json`,
       url_mapping_file: `airtable-extractions/${globalPrefix || 'S25Top100'}airtable_url_mapping.json`,
+      base_id: globalBaseId || "appCicrQbZaRq1Tvo",
+      table_id: globalTableId || "tblIJ47Fniuu9EJat",
     }));
-  }, [globalPrefix]);
+  }, [globalPrefix, globalBaseId, globalTableId]);
 
   const handleInputChange = (e) => {
     const { name, value, type } = e.target;
@@ -36,6 +40,8 @@ const AirtableUpdater = ({ globalPrefix, onJobStarted, onError }) => {
         traits_file: formData.traits_file,
         url_mapping_file: formData.url_mapping_file,
         delay_between_updates: formData.delay_between_updates,
+        base_id: formData.base_id,
+        table_id: formData.table_id,
       };
 
       const result = await apiService.startAirtableUpdate(config);
@@ -49,6 +55,8 @@ const AirtableUpdater = ({ globalPrefix, onJobStarted, onError }) => {
         traits_file: `final-trait-extractions/${globalPrefix || 'S25Top100'}_comprehensive_traits.json`,
         url_mapping_file: `airtable-extractions/${globalPrefix || 'S25Top100'}airtable_url_mapping.json`,
         delay_between_updates: 0.5,
+        base_id: globalBaseId || "appCicrQbZaRq1Tvo",
+        table_id: globalTableId || "tblIJ47Fniuu9EJat",
       });
 
     } catch (error) {
@@ -96,6 +104,32 @@ const AirtableUpdater = ({ globalPrefix, onJobStarted, onError }) => {
         </div>
 
         <div className="form-group">
+          <label className="form-label">Airtable Base ID</label>
+          <input
+            type="text"
+            className="form-control"
+            name="base_id"
+            value={formData.base_id}
+            onChange={handleInputChange}
+            placeholder="appCicrQbZaRq1Tvo"
+          />
+          <small>Airtable base ID to connect to - Uses global setting by default</small>
+        </div>
+
+        <div className="form-group">
+          <label className="form-label">Airtable Table ID</label>
+          <input
+            type="text"
+            className="form-control"
+            name="table_id"
+            value={formData.table_id}
+            onChange={handleInputChange}
+            placeholder="tblIJ47Fniuu9EJat"
+          />
+          <small>Airtable table ID to connect to - Uses global setting by default</small>
+        </div>
+
+        <div className="form-group">
           <label className="form-label">Delay Between Updates (seconds)</label>
           <input
             type="number"
@@ -103,11 +137,11 @@ const AirtableUpdater = ({ globalPrefix, onJobStarted, onError }) => {
             name="delay_between_updates"
             value={formData.delay_between_updates}
             onChange={handleInputChange}
-            min="0.1"
-            max="2.0"
             step="0.1"
+            min="0"
+            max="10"
           />
-          <small>Delay between Airtable API calls to avoid rate limits</small>
+          <small>Delay between Airtable API calls to avoid rate limiting</small>
         </div>
 
         <div style={{ 
@@ -179,7 +213,7 @@ const AirtableUpdater = ({ globalPrefix, onJobStarted, onError }) => {
               Starting Airtable Update...
             </>
           ) : (
-            '📊 Start Airtable Update'
+            'Start Airtable Update'
           )}
         </button>
       </form>

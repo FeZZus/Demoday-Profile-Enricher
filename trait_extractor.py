@@ -379,7 +379,7 @@ IMPORTANT: Return ONLY the JSON object, no additional text or markdown formattin
         try:
             if os.path.exists(output_file):
                 with open(output_file, 'r', encoding='utf-8') as file:
-                    existing_data = json.load(f)
+                    existing_data = json.load(file)
                 existing_results = [
                     ExtractedTraits(
                         full_name=item['full_name'],
@@ -405,6 +405,9 @@ IMPORTANT: Return ONLY the JSON object, no additional text or markdown formattin
     def append_results_to_file(self, new_results: List[ExtractedTraits], output_file: str) -> int:
         """Append new results to existing file"""
         try:
+            # Ensure output directory exists
+            os.makedirs(os.path.dirname(output_file), exist_ok=True)
+            
             existing_results = self.load_existing_results(output_file)
             existing_results.extend(new_results)
             self.save_results(existing_results, output_file)
@@ -525,28 +528,34 @@ IMPORTANT: Return ONLY the JSON object, no additional text or markdown formattin
     
     def save_results(self, results: List[ExtractedTraits], output_file: str):
         """Save comprehensive extraction results to JSON file."""
-        output_data = []
-        
-        for traits in results:
-            output_data.append({
-                'full_name': traits.full_name,
-                'linkedin_url': traits.linkedin_url,
-                'estimated_age': traits.estimated_age,
-                'education_stages': traits.education_stages,
-                'career_insights': traits.career_insights,
-                'company_background': traits.company_background,
-                'accelerator_and_programs': traits.accelerator_and_programs,
-                'education_career_alignment': traits.education_career_alignment,
-                'personal_brand': traits.personal_brand,
-                'research_and_academic': traits.research_and_academic,
-                'international_experience': traits.international_experience,
-                'confidence_score': traits.confidence_score
-            })
-        
-        with open(output_file, 'w', encoding='utf-8') as f:
-            json.dump(output_data, f, indent=2, ensure_ascii=False)
-        
-        print(f"Results saved to {output_file}")
+        try:
+            # Ensure output directory exists
+            os.makedirs(os.path.dirname(output_file), exist_ok=True)
+            
+            output_data = []
+            
+            for traits in results:
+                output_data.append({
+                    'full_name': traits.full_name,
+                    'linkedin_url': traits.linkedin_url,
+                    'estimated_age': traits.estimated_age,
+                    'education_stages': traits.education_stages,
+                    'career_insights': traits.career_insights,
+                    'company_background': traits.company_background,
+                    'accelerator_and_programs': traits.accelerator_and_programs,
+                    'education_career_alignment': traits.education_career_alignment,
+                    'personal_brand': traits.personal_brand,
+                    'research_and_academic': traits.research_and_academic,
+                    'international_experience': traits.international_experience,
+                    'confidence_score': traits.confidence_score
+                })
+            
+            with open(output_file, 'w', encoding='utf-8') as f:
+                json.dump(output_data, f, indent=2, ensure_ascii=False)
+            
+            print(f"Results saved to {output_file}")
+        except Exception as e:
+            print(f"Error saving results: {e}")
 
     def check_progress(self, input_profiles_file: str, output_file: str) -> Dict[str, Any]:
         """

@@ -77,3 +77,5 @@ frontend/dist/
 
 # just dry code
 bad-code/
+.env
+backups/

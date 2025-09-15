@@ -1,14 +1,44 @@
 import React, { useState, useEffect } from 'react';
 import { apiService } from '../api';
 
-const GlobalSettings = ({ globalPrefix, onPrefixChange, globalEventFilter, onEventFilterChange, globalTop100Filter, onTop100FilterChange, onError }) => {
-  const [localPrefix, setLocalPrefix] = useState(globalPrefix || 'S25Top100');
+const GlobalSettings = ({ 
+  globalPrefix, 
+  onPrefixChange, 
+  globalEventFilter, 
+  onEventFilterChange, 
+  globalTop100Filter, 
+  onTop100FilterChange,
+  globalBaseId,
+  onBaseIdChange,
+  globalTableId,
+  onTableIdChange,
+  onError 
+}) => {
   const [localEventFilter, setLocalEventFilter] = useState(globalEventFilter || 'S25');
   const [localTop100Filter, setLocalTop100Filter] = useState(globalTop100Filter !== undefined ? globalTop100Filter : true);
+  const [localBaseId, setLocalBaseId] = useState(globalBaseId || 'appCicrQbZaRq1Tvo');
+  const [localTableId, setLocalTableId] = useState(globalTableId || 'tblpzAcC0vMMibdca');
+  
+  // Track if user has manually overridden the auto-generated prefix
+  const [isPrefixManuallySet, setIsPrefixManuallySet] = useState(false);
+  const [localPrefix, setLocalPrefix] = useState(globalPrefix || 'S25Top100');
 
+  // Generate prefix based on event filter and top 100 filter
+  const generatePrefix = (eventFilter, top100Filter) => {
+    const event = eventFilter || 'S25';
+    const suffix = top100Filter ? 'Top100' : 'All';
+    return `${event}${suffix}`;
+  };
+
+  // Update local prefix when global prefix changes
   useEffect(() => {
-    setLocalPrefix(globalPrefix || 'S25Top100');
-  }, [globalPrefix]);
+    if (!isPrefixManuallySet) {
+      const autoPrefix = generatePrefix(globalEventFilter, globalTop100Filter);
+      setLocalPrefix(autoPrefix);
+    } else {
+      setLocalPrefix(globalPrefix || 'S25Top100');
+    }
+  }, [globalPrefix, globalEventFilter, globalTop100Filter, isPrefixManuallySet]);
 
   useEffect(() => {
     setLocalEventFilter(globalEventFilter || 'S25');
@@ -18,9 +48,18 @@ const GlobalSettings = ({ globalPrefix, onPrefixChange, globalEventFilter, onEve
     setLocalTop100Filter(globalTop100Filter !== undefined ? globalTop100Filter : true);
   }, [globalTop100Filter]);
 
+  useEffect(() => {
+    setLocalBaseId(globalBaseId || 'appCicrQbZaRq1Tvo');
+  }, [globalBaseId]);
+
+  useEffect(() => {
+    setLocalTableId(globalTableId || 'tblpzAcC0vMMibdca');
+  }, [globalTableId]);
+
   const handlePrefixChange = (e) => {
     const newPrefix = e.target.value;
     setLocalPrefix(newPrefix);
+    setIsPrefixManuallySet(true); // Mark as manually set
     if (onPrefixChange) {
       onPrefixChange(newPrefix);
     }
@@ -29,6 +68,16 @@ const GlobalSettings = ({ globalPrefix, onPrefixChange, globalEventFilter, onEve
   const handleEventFilterChange = (e) => {
     const newEventFilter = e.target.value;
     setLocalEventFilter(newEventFilter);
+    
+    // Auto-update prefix if not manually set
+    if (!isPrefixManuallySet) {
+      const newPrefix = generatePrefix(newEventFilter, localTop100Filter);
+      setLocalPrefix(newPrefix);
+      if (onPrefixChange) {
+        onPrefixChange(newPrefix);
+      }
+    }
+    
     if (onEventFilterChange) {
       onEventFilterChange(newEventFilter);
     }
@@ -37,8 +86,43 @@ const GlobalSettings = ({ globalPrefix, onPrefixChange, globalEventFilter, onEve
   const handleTop100FilterChange = (e) => {
     const newTop100Filter = e.target.checked;
     setLocalTop100Filter(newTop100Filter);
+    
+    // Auto-update prefix if not manually set
+    if (!isPrefixManuallySet) {
+      const newPrefix = generatePrefix(localEventFilter, newTop100Filter);
+      setLocalPrefix(newPrefix);
+      if (onPrefixChange) {
+        onPrefixChange(newPrefix);
+      }
+    }
+    
     if (onTop100FilterChange) {
       onTop100FilterChange(newTop100Filter);
+    }
+  };
+
+  const handleBaseIdChange = (e) => {
+    const newBaseId = e.target.value;
+    setLocalBaseId(newBaseId);
+    if (onBaseIdChange) {
+      onBaseIdChange(newBaseId);
+    }
+  };
+
+  const handleTableIdChange = (e) => {
+    const newTableId = e.target.value;
+    setLocalTableId(newTableId);
+    if (onTableIdChange) {
+      onTableIdChange(newTableId);
+    }
+  };
+
+  const handleResetPrefix = () => {
+    const autoPrefix = generatePrefix(localEventFilter, localTop100Filter);
+    setLocalPrefix(autoPrefix);
+    setIsPrefixManuallySet(false);
+    if (onPrefixChange) {
+      onPrefixChange(autoPrefix);
     }
   };
 
@@ -75,16 +159,41 @@ const GlobalSettings = ({ globalPrefix, onPrefixChange, globalEventFilter, onEve
       
       <div className="form-group">
         <label className="form-label">Global Output Prefix</label>
-        <input
-          type="text"
-          className="form-control"
-          value={localPrefix}
-          onChange={handlePrefixChange}
-          placeholder="S25Top100"
-        />
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <input
+            type="text"
+            className="form-control"
+            value={localPrefix}
+            onChange={handlePrefixChange}
+            placeholder="S25Top100"
+            style={{ flex: 1 }}
+          />
+          {isPrefixManuallySet && (
+            <button
+              type="button"
+              className="btn btn-outline-secondary"
+              onClick={handleResetPrefix}
+              style={{ whiteSpace: 'nowrap' }}
+              title="Reset to auto-generated prefix"
+            >
+              🔄 Reset
+            </button>
+          )}
+        </div>
         <small>
-          This prefix will be used for all input and output files across all sections. 
-          Examples: S25Top100, MyProject, TestRun
+          {isPrefixManuallySet ? (
+            <>
+              Custom prefix set. Click "Reset" to auto-generate based on Event Filter and Top 100 Filter.
+              <br />
+              <strong>Auto-generated would be:</strong> {generatePrefix(localEventFilter, localTop100Filter)}
+            </>
+          ) : (
+            <>
+              Auto-generated from Event Filter and Top 100 Filter. 
+              <br />
+              <strong>Current:</strong> {generatePrefix(localEventFilter, localTop100Filter)}
+            </>
+          )}
         </small>
       </div>
 
@@ -111,6 +220,34 @@ const GlobalSettings = ({ globalPrefix, onPrefixChange, globalEventFilter, onEve
           Top 100 Filter Only
         </label>
         <small>Only process records marked as "Top 100" - applies to all operations</small>
+      </div>
+
+      <div className="form-group">
+        <label className="form-label">Airtable Base ID</label>
+        <input
+          type="text"
+          className="form-control"
+          value={localBaseId}
+          onChange={handleBaseIdChange}
+          placeholder="appCicrQbZaRq1Tvo"
+        />
+        <small>
+          The Airtable base ID to connect to. Found in your Airtable URL:   https://airtable.com/appXXXXXXXXXXXXX
+        </small>
+      </div>
+
+      <div className="form-group">
+        <label className="form-label">Airtable Table ID</label>
+        <input
+          type="text"
+          className="form-control"
+          value={localTableId}
+          onChange={handleTableIdChange}
+          placeholder="tblpzAcC0vMMibdca"
+        />
+        <small>
+          The Airtable table ID to connect to. Found in your table URL or API documentation. Default is 'Startup' table
+        </small>
       </div>
 
       <div className="form-group">

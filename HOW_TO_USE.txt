@@ -1,0 +1,9 @@
+go into cmd
+
+activate the env: .\venv\Scripts\actiavte
+
+then run both front end and back end: .\emergency_restart_services.bat
+
+Then go to here: https://airtable.com/appCicrQbZaRq1Tvo/api/docs#curl/table:startups
+And find the appropriate table id
+And in the same site here go to the top for the base id: https://airtable.com/appCicrQbZaRq1Tvo/api/docs#curl/introduction

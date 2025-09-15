@@ -25,15 +25,15 @@ load_dotenv()
 class AirtableLinkedInExtractor:
     """Extract LinkedIn URLs from Airtable for Apify processing."""
     
-    def __init__(self):
+    def __init__(self, base_id: str = 'appCicrQbZaRq1Tvo', table_id: str = 'tblIJ47Fniuu9EJat'):
         """Initialize the Airtable connection."""
         self.api_key = os.getenv('AIRTABLE_API_KEY')
         if not self.api_key:
             raise ValueError("AIRTABLE_API_KEY environment variable not set")
         
         self.api = Api(self.api_key)
-        self.base_id = 'appCicrQbZaRq1Tvo'
-        self.table_id = 'tblIJ47Fniuu9EJat' # original id is 'tblpzAcC0vMMibdca'
+        self.base_id = base_id
+        self.table_id = table_id
         self.table = self.api.table(self.base_id, self.table_id)
         
         # Data storage
@@ -114,12 +114,14 @@ class AirtableLinkedInExtractor:
         
         return None
     
-    def extract_linkedin_urls(self, linkedin_fields: List[str] = None) -> Dict[str, any]:
+    def extract_linkedin_urls(self, linkedin_fields: List[str] = None, event_filter: str = 'S25', top_100_filter: bool = True) -> Dict[str, any]:
         """
         Extract all LinkedIn URLs from Airtable.
         
         Args:
             linkedin_fields: List of field names to check for LinkedIn URLs
+            event_filter: Event filter to apply (e.g., 'S25', 'W24')
+            top_100_filter: Whether to only process Top 100 records
             
         Returns:
             Dictionary with extraction results and statistics
@@ -132,6 +134,8 @@ class AirtableLinkedInExtractor:
         print("Starting LinkedIn URL extraction from Airtable...")
         print(f"Base ID: {self.base_id}")
         print(f"Table ID: {self.table_id}")
+        print(f"Event Filter: {event_filter}")
+        print(f"Top 100 Filter: {top_100_filter}")
         print(f"Checking fields: {linkedin_fields}")
         print("-" * 60)
         
@@ -154,13 +158,18 @@ class AirtableLinkedInExtractor:
                     linkedin_url = None
                     found_field = None
              
-
-                    filter_condition = {'Event': 'S25', 'Top 100': True}
-                    flag = True
-                    for filter in filter_condition:
-                        if filter not in fields or fields[filter] != filter_condition[filter]:
-                            flag = False
-                    if flag:
+                    # Apply filters based on parameters
+                    should_process = True
+                    
+                    # Check Event filter
+                    if 'Event' in fields and fields['Event'].strip() != event_filter:
+                        should_process = False
+                    
+                    # Check Top 100 filter
+                    if top_100_filter and ('Top 100' not in fields or not fields['Top 100']):
+                        should_process = False
+                    
+                    if should_process:
                         # Check each potential LinkedIn field (theres only one that matters atm)
                         for field_name in linkedin_fields:
                             if field_name in fields and fields[field_name]:
@@ -225,7 +234,13 @@ class AirtableLinkedInExtractor:
         print(f"Valid LinkedIn URLs found: {len(self.valid_urls)}")
         print(f"Invalid URLs found: {len(self.invalid_urls)}")
         print(f"Records without LinkedIn URLs: {len(self.missing_urls)}")
-        print(f"Success rate: {len(self.valid_urls)/total_records*100:.1f}%")
+        
+        # Avoid division by zero
+        if total_records > 0:
+            success_rate = (len(self.valid_urls) / total_records) * 100
+            print(f"Success rate: {success_rate:.1f}%")
+        else:
+            print("Success rate: N/A (no records processed)")
         
         if self.invalid_urls:
             print(f"\nFirst few invalid URLs:")
@@ -267,8 +282,16 @@ class AirtableLinkedInExtractor:
 
 def main():
     """Main execution function."""
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Extract LinkedIn URLs from Airtable')
+    parser.add_argument('--base-id', default='appCicrQbZaRq1Tvo', help='Airtable base ID')
+    parser.add_argument('--table-id', default='tblIJ47Fniuu9EJat', help='Airtable table ID')
+    
+    args = parser.parse_args()
+    
     try:
-        extractor = AirtableLinkedInExtractor()
+        extractor = AirtableLinkedInExtractor(base_id=args.base_id, table_id=args.table_id)
         results = extractor.extract_linkedin_urls()
         
         print(f"\n✅ Extraction complete!")

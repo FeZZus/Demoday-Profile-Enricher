@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import ExtractionForm from './components/ExtractionForm';
 import JobList from './components/JobList';
 import HealthStatus from './components/HealthStatus';
@@ -14,11 +14,22 @@ function App() {
   const [messages, setMessages] = useState([]);
   // Default state starts off in extract tab
   const [activeTab, setActiveTab] = useState('extract');
-  // Default prefix is S25Top100  
-  const [globalPrefix, setGlobalPrefix] = useState('S25Top100');
   // Global filter settings
   const [globalEventFilter, setGlobalEventFilter] = useState('S25');
   const [globalTop100Filter, setGlobalTop100Filter] = useState(true);
+  // Global Airtable settings
+  const [globalBaseId, setGlobalBaseId] = useState('appCicrQbZaRq1Tvo');
+  const [globalTableId, setGlobalTableId] = useState('tblpzAcC0vMMibdca');
+  
+  // Generate prefix based on event filter and top 100 filter
+  const generatePrefix = (eventFilter, top100Filter) => {
+    const event = eventFilter || 'S25';
+    const suffix = top100Filter ? 'Top100' : 'All';
+    return `${event}${suffix}`;
+  };
+  
+  // Initialize global prefix based on default settings
+  const [globalPrefix, setGlobalPrefix] = useState(generatePrefix('S25', true));
 
   const addMessage = (type, message) => {
     const id = Date.now();
@@ -67,10 +78,28 @@ function App() {
 
   const handleGlobalEventFilterChange = (newEventFilter) => {
     setGlobalEventFilter(newEventFilter);
+    // Auto-update prefix if it matches the auto-generated pattern
+    const autoPrefix = generatePrefix(newEventFilter, globalTop100Filter);
+    if (globalPrefix === generatePrefix(globalEventFilter, globalTop100Filter)) {
+      setGlobalPrefix(autoPrefix);
+    }
   };
 
   const handleGlobalTop100FilterChange = (newTop100Filter) => {
     setGlobalTop100Filter(newTop100Filter);
+    // Auto-update prefix if it matches the auto-generated pattern
+    const autoPrefix = generatePrefix(globalEventFilter, newTop100Filter);
+    if (globalPrefix === generatePrefix(globalEventFilter, globalTop100Filter)) {
+      setGlobalPrefix(autoPrefix);
+    }
+  };
+
+  const handleGlobalBaseIdChange = (newBaseId) => {
+    setGlobalBaseId(newBaseId);
+  };
+
+  const handleGlobalTableIdChange = (newTableId) => {
+    setGlobalTableId(newTableId);
   };
 
   return (
@@ -89,6 +118,10 @@ function App() {
           onEventFilterChange={handleGlobalEventFilterChange}
           globalTop100Filter={globalTop100Filter}
           onTop100FilterChange={handleGlobalTop100FilterChange}
+          globalBaseId={globalBaseId}
+          onBaseIdChange={handleGlobalBaseIdChange}
+          globalTableId={globalTableId}
+          onTableIdChange={handleGlobalTableIdChange}
           onError={handleError}
         />
 
@@ -182,6 +215,8 @@ function App() {
               globalPrefix={globalPrefix}
               globalEventFilter={globalEventFilter}
               globalTop100Filter={globalTop100Filter}
+              globalBaseId={globalBaseId}
+              globalTableId={globalTableId}
               onJobStarted={handleJobStarted}
               onError={handleError}
             />
@@ -223,6 +258,8 @@ function App() {
           {activeTab === 'airtable' && (
             <AirtableUpdater 
               globalPrefix={globalPrefix}
+              globalBaseId={globalBaseId}
+              globalTableId={globalTableId}
               onError={handleError} 
             />
           )}

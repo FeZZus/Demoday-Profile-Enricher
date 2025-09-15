@@ -8,6 +8,7 @@ const ApifyProcessor = ({ globalPrefix, onJobStarted, onError }) => {
     batch_size: 50,
     test_mode: true,
     test_num_urls: 10,
+    force_restart: false,
   });
 
   const [isLoading, setIsLoading] = useState(false);
@@ -40,6 +41,7 @@ const ApifyProcessor = ({ globalPrefix, onJobStarted, onError }) => {
         batch_size: formData.batch_size,
         test_mode: formData.test_mode,
         test_num_urls: formData.test_num_urls,
+        force_restart: formData.force_restart,
       };
 
       const result = await apiService.startApifyProcessing(config);
@@ -55,6 +57,7 @@ const ApifyProcessor = ({ globalPrefix, onJobStarted, onError }) => {
         batch_size: 50,
         test_mode: true,
         test_num_urls: 10,
+        force_restart: false,
       });
 
     } catch (error) {
@@ -144,6 +147,20 @@ const ApifyProcessor = ({ globalPrefix, onJobStarted, onError }) => {
             <small>Number of URLs to process in test mode</small>
           </div>
         )}
+
+        <div className="form-group">
+          <label className="form-label">
+            <input
+              type="checkbox"
+              name="force_restart"
+              checked={formData.force_restart}
+              onChange={handleInputChange}
+              style={{ marginRight: '8px' }}
+            />
+            Force Restart (Clear Progress)
+          </label>
+          <small>Clear existing progress and start from the beginning</small>
+        </div>
 
         <div style={{ 
           backgroundColor: '#f8f9fa', 

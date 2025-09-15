@@ -1,12 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import { apiService } from '../api';
 
-const ExtractionForm = ({ globalPrefix, globalEventFilter, globalTop100Filter, onJobStarted, onError }) => {
+const ExtractionForm = ({ 
+  globalPrefix, 
+  globalEventFilter, 
+  globalTop100Filter, 
+  globalBaseId,
+  globalTableId,
+  onJobStarted, 
+  onError 
+}) => {
   const [formData, setFormData] = useState({
     linkedin_fields: ["4. CEO LinkedIn"],
     event_filter: globalEventFilter || "S25",
     top_100_filter: globalTop100Filter !== undefined ? globalTop100Filter : true,
     output_prefix: globalPrefix || "S25Top100",
+    base_id: globalBaseId || "appCicrQbZaRq1Tvo",
+    table_id: globalTableId || "tblIJ47Fniuu9EJat",
     job_id: "",
   });
 
@@ -18,9 +28,11 @@ const ExtractionForm = ({ globalPrefix, globalEventFilter, globalTop100Filter, o
       ...prev,
       output_prefix: globalPrefix || "S25Top100",
       event_filter: globalEventFilter || "S25",
-      top_100_filter: globalTop100Filter !== undefined ? globalTop100Filter : true
+      top_100_filter: globalTop100Filter !== undefined ? globalTop100Filter : true,
+      base_id: globalBaseId || "appCicrQbZaRq1Tvo",
+      table_id: globalTableId || "tblIJ47Fniuu9EJat",
     }));
-  }, [globalPrefix, globalEventFilter, globalTop100Filter]);
+  }, [globalPrefix, globalEventFilter, globalTop100Filter, globalBaseId, globalTableId]);
 
   const handleInputChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -41,6 +53,8 @@ const ExtractionForm = ({ globalPrefix, globalEventFilter, globalTop100Filter, o
         event_filter: formData.event_filter,
         top_100_filter: formData.top_100_filter,
         output_prefix: formData.output_prefix,
+        base_id: formData.base_id,
+        table_id: formData.table_id,
         job_id: formData.job_id || null,
       };
 
@@ -56,6 +70,8 @@ const ExtractionForm = ({ globalPrefix, globalEventFilter, globalTop100Filter, o
         event_filter: "S25",
         top_100_filter: true,
         output_prefix: globalPrefix || "S25Top100",
+        base_id: globalBaseId || "appCicrQbZaRq1Tvo",
+        table_id: globalTableId || "tblIJ47Fniuu9EJat",
         job_id: "",
       });
 
@@ -99,6 +115,32 @@ const ExtractionForm = ({ globalPrefix, globalEventFilter, globalTop100Filter, o
             placeholder="S25Top100"
           />
           <small>Prefix for output files (e.g., S25Top100, MyExtraction) - Uses global prefix by default</small>
+        </div>
+
+        <div className="form-group">
+          <label className="form-label">Airtable Base ID</label>
+          <input
+            type="text"
+            className="form-control"
+            name="base_id"
+            value={formData.base_id}
+            onChange={handleInputChange}
+            placeholder="appCicrQbZaRq1Tvo"
+          />
+          <small>Airtable base ID to connect to - Uses global setting by default</small>
+        </div>
+
+        <div className="form-group">
+          <label className="form-label">Airtable Table ID</label>
+          <input
+            type="text"
+            className="form-control"
+            name="table_id"
+            value={formData.table_id}
+            onChange={handleInputChange}
+            placeholder="tblIJ47Fniuu9EJat"
+          />
+          <small>Airtable table ID to connect to - Uses global setting by default</small>
         </div>
 
         <div className="form-group">

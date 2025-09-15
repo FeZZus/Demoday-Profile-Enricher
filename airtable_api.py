@@ -1,8 +1,5 @@
 """
 
-DONT GET THIS AT ALL: https://chatgpt.com/c/6880147d-11c4-8012-ad88-f3d9c4474745
-
-
 FastAPI Backend for Airtable LinkedIn URL Extraction
 
 This API provides endpoints to:

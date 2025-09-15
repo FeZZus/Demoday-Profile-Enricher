@@ -79,3 +79,10 @@ frontend/dist/
 bad-code/
 .env
 backups/
+
+README.md
+
+/README.md
+
+HOW_TO_USE.txt
+/HOW_TO_USE.txt

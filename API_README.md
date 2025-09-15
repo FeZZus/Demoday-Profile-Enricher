@@ -264,7 +264,3 @@ For issues or questions:
 1. Check the interactive API docs at `/docs`
 2. Review server logs for detailed error messages
 3. Verify environment configuration
-
-## License
-
-This project is part of the Onstage Profile Enricher system. 
